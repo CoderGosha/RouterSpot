@@ -6,5 +6,6 @@ local.properties
 .kotlin/
 app/src/main/jniLibs/*/libxray.so
 
-# Внутренние документы (ТЗ, заметки) — только локально
-docs/
+# Внутренние документы (ТЗ, заметки) — только локально; скриншоты для README — в репозитории
+docs/*
+!docs/screenshots/

@@ -4,6 +4,11 @@
 
 Android app that turns your phone into a VPN router. The phone shares a regular Wi-Fi hotspot, and all traffic of connected devices goes through your VPN. Nothing to install or configure on the laptop, TV or set-top box. **No root required.**
 
+<p align="center">
+  <img src="docs/screenshots/en-idle.png" width="270" alt="Sharing is off">
+  <img src="docs/screenshots/en-active.png" width="270" alt="Sharing is on">
+</p>
+
 - One APK: the VPN core, the tunnel and the hotspot control are all inside.
 - Supported links: `vless://` (Reality, TLS, plain) and NaiveProxy `https://user:pass@host:port`.
 - Profile import from clipboard or QR code; hot switching between servers while sharing.
@@ -69,6 +74,11 @@ Requires JDK 17 and the Android SDK (platform 35).
 [English](#routerspot) · **Русский**
 
 Приложение для Android, которое превращает телефон в VPN-роутер. Телефон раздаёт обычный Wi-Fi, а весь трафик подключённых устройств идёт через ваш VPN. На ноутбуке, телевизоре или приставке ничего ставить и настраивать не нужно. **Root не нужен.**
+
+<p align="center">
+  <img src="docs/screenshots/ru-idle.png" width="270" alt="Раздача выключена">
+  <img src="docs/screenshots/ru-active.png" width="270" alt="Раздача активна">
+</p>
 
 - Один APK: ядро VPN, туннель и управление хотспотом уже внутри.
 - Поддерживаются ссылки `vless://` (Reality, TLS, без шифрования) и NaiveProxy `https://user:pass@host:port`.
