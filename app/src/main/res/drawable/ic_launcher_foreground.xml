@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Волна Wi-Fi с узлом и уголками-скобками в безопасной зоне 66dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#111214" android:strokeWidth="2.6"
+        android:pathData="M33,40V33H40 M68,75H75V68"/>
+    <path android:strokeColor="#111214" android:strokeWidth="4.6"
+        android:pathData="M37.58,50 A22.80,22.80 0 0,1 70.42,50 M45.11,56.65 A12.35,12.35 0 0,1 62.89,56.65"/>
+    <path android:fillColor="#111214" android:pathData="M50.20,59.50h7.60v7.60h-7.60z"/>
+</vector>
