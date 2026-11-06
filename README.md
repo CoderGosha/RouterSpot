@@ -11,6 +11,7 @@ Android app that turns your phone into a VPN router. The phone shares a regular 
 
 - One APK: the VPN core, the tunnel and the hotspot control are all inside.
 - Supported links: `vless://` (Reality, TLS, plain) and NaiveProxy `https://user:pass@host:port`.
+- Sharing over Wi-Fi or, as an experimental mode with partial leak protection, a USB cable.
 - Profile import from clipboard or QR code; hot switching between servers while sharing.
 - No leaks: if the tunnel drops, clients lose internet instead of going online directly. IPv6 is not handed out to clients.
 - Automatic reconnect when the phone switches between Wi-Fi and mobile data.
@@ -50,6 +51,8 @@ The service lives until the phone reboots. After a reboot, connect to any Wi-Fi 
 
 - Hidden APIs depend on the firmware: the mechanism may not work on some phones. Run **System → Diagnostics** to check.
 - On phones that cannot run Wi-Fi and a hotspot at the same time, wireless debugging turns off when sharing starts; the service keeps working.
+- USB is experimental. Changing the USB mode restarts adbd and kills the shell service, so USB sharing runs inside the app process with delegated shell rights. If the system closes the whole app (for example, Force stop), the tunnel disappears and the device on the cable may go online directly, without VPN. Use Wi-Fi for full protection.
+- USB: after the cable is unplugged, sharing has to be started again. Wi-Fi sharing after USB needs the service restarted through wireless debugging. Android phones often tether over RNDIS, which macOS does not support out of the box.
 - NaiveProxy has no UDP: DNS is sent over TCP through the tunnel, other UDP is blocked (apps fall back to TCP).
 
 ## Building
@@ -82,6 +85,7 @@ Requires JDK 17 and the Android SDK (platform 35).
 
 - Один APK: ядро VPN, туннель и управление хотспотом уже внутри.
 - Поддерживаются ссылки `vless://` (Reality, TLS, без шифрования) и NaiveProxy `https://user:pass@host:port`.
+- Раздача по Wi-Fi или, в экспериментальном режиме с неполной защитой от утечек, по USB-кабелю.
 - Импорт профилей из буфера обмена или по QR-коду, смена сервера на ходу без остановки раздачи.
 - Без утечек: если туннель оборвётся, клиенты останутся без интернета, но не выйдут в сеть напрямую. IPv6 клиентам не выдаётся.
 - Автоматическое переподключение, когда телефон переходит между Wi-Fi и мобильной сетью.
@@ -121,6 +125,8 @@ Requires JDK 17 and the Android SDK (platform 35).
 
 - Скрытые API зависят от прошивки: на части телефонов механизм может не работать. Проверить можно в **«Система → Диагностика»**.
 - На телефонах, которые не умеют одновременно Wi-Fi и хотспот, отладка выключится при включении раздачи; служба продолжит работать.
+- USB — экспериментальный режим. Смена режима USB перезапускает adbd и убивает службу shell, поэтому USB-раздача работает в процессе приложения с делегированными правами shell. Если система закроет приложение целиком (например, «Остановить»), туннель исчезнет, и устройство на кабеле может выйти в интернет напрямую, без VPN. Для полной защиты используйте Wi-Fi.
+- USB: после отключения кабеля раздачу нужно запустить заново. Для раздачи по Wi-Fi после USB службу придётся перезапустить через отладку по Wi-Fi. Телефоны часто раздают по RNDIS, который macOS штатно не поддерживает.
 - У NaiveProxy нет UDP: DNS идёт по TCP через туннель, остальной UDP блокируется (приложения переходят на TCP).
 
 ## Сборка

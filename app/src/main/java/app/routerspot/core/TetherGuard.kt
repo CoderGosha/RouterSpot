@@ -27,6 +27,10 @@ class TetherGuard(
     private var clientCount = 0
     private var upstream: Network? = null
 
+    /** Шаблоны USB-интерфейсов из настроек прошивки; пусто — USB-раздача не настроена. */
+    var usbRegexps: List<String> = emptyList()
+        private set
+
     private var callback: Any? = null
 
     fun register() {
@@ -45,6 +49,13 @@ class TetherGuard(
                     clientCount = (args?.get(0) as Collection<*>).size
                     onTetheringChanged(tetheredActive, clientCount)
                     if (clientCount > 0) checkUpstream("client connected while upstream is not the tunnel")
+                    null
+                }
+                "onTetherableInterfaceRegexpsChanged" -> {
+                    val regexps = args?.get(0)
+                    usbRegexps = runCatching {
+                        regexps!!.javaClass.getMethod("getTetherableUsbRegexs").invoke(regexps) as List<*>
+                    }.getOrDefault(emptyList<Any>()).map { it.toString() }
                     null
                 }
                 "hashCode" -> System.identityHashCode(self)

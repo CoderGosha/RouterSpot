@@ -2,6 +2,7 @@ package app.routerspot
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -23,6 +24,9 @@ object ServerConnection {
         private set
     @Volatile var vpnActive = false
         private set
+    /** Сейчас подключена USB-служба: она живёт в этом же процессе, поэтому binder локальный. */
+    val usbHosted get() = server?.asBinder() is Binder
+    private var appContext: Context? = null
 
     /** Вызывается на главном потоке после гибели служебного процесса; аргумент — шла ли раздача. */
     var onDied: ((wasActive: Boolean) -> Unit)? = null
@@ -31,14 +35,20 @@ object ServerConnection {
         override fun onVpnStateChanged(active: Boolean) {
             vpnActive = active
             Log.i(TAG, "vpn active=$active")
+            if (!active) appContext?.let(UsbGuardService::disarm)
         }
     }
 
     /** Вызывается из [ServerProvider], когда служебный процесс передал свой binder. */
     fun attach(context: Context, binder: IBinder) {
+        appContext = context.applicationContext
+        val previous = server
+        val hostToReplace = previous.takeIf { usbHosted && binder !is Binder }
+        if (hostToReplace != null && vpnActive) return Log.w(TAG, "shell service ignored: usb sharing is on").let {}
         val remote = IRouterSpotServer.Stub.asInterface(binder)
         binder.linkToDeath({ main.post { onServerDied(binder) } }, 0)
         server = remote
+        hostToReplace?.let { host -> runCatching { host.quitUsbHost() } }
         ensureGuard(context.applicationContext)
         remote.attachClient(client)
         Log.i(TAG, "server attached")

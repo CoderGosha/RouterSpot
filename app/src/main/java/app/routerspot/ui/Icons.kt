@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 /** Линейные иконки 24×24 из макета (stroke). */
 object Icons {
     val wifi = icon("M5 12.5a10 10 0 0 1 14 0", "M8.5 15.5a5 5 0 0 1 7 0", "M11 18.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0")
+    val usb = icon("M12 21V4", "M9.5 6.5L12 3.5l2.5 3", "M12 15l-5-3V9.5", "M5.75 7h2.5v2.5h-2.5z", "M12 18l5-3v-3", "M15.75 10.75a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0")
     val shield = icon("M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z")
     val list = icon("M4 6h16M4 12h16M4 18h10")
     val terminal = icon("M4 5h16v14H4z", "M8 10l3 2-3 2M13 15h3")

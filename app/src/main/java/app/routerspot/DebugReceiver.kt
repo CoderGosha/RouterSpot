@@ -8,13 +8,14 @@ import app.routerspot.adb.AdbDiscovery
 import app.routerspot.adb.AdbManager
 import app.routerspot.adb.PairingService
 import app.routerspot.adb.ServerLauncher
+import app.routerspot.core.TetherGuard
 import kotlin.concurrent.thread
 
 /**
  * Управление без интерфейса для проверок на эмуляторе. Отправить может только shell
  * (receiver защищён разрешением DUMP):
  *   adb shell am broadcast -n app.routerspot/.DebugReceiver -a app.routerspot.debug.PAIR --es code 123456
- * Действия: PAIR (code), PAIR_WATCH (сопряжение через уведомление), LAUNCH, PROFILE (link), START (link), HOTSPOT (on: true|false), STOP, STATUS.
+ * Действия: PAIR (code), PAIR_WATCH (сопряжение через уведомление), LAUNCH, PROFILE (link), START (link), HOTSPOT (on: true|false), USB (on: true|false), USB_HOST, USB_GUARD, STOP, STATUS.
  */
 class DebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -38,7 +39,10 @@ class DebugReceiver : BroadcastReceiver() {
             "LAUNCH" -> ServerLauncher.launch(context).also { AppController.onPaired() }
             "PROFILE" -> AppController.profiles.add(intent.getStringExtra("link")!!).proxy.name
             "START" -> server().start(intent.getStringExtra("link")!!) ?: "ok"
-            "HOTSPOT" -> server().setHotspot(intent.getStringExtra("on") == "true") ?: "ok"
+            "HOTSPOT" -> server().setTethering(TetherGuard.TETHERING_WIFI, intent.getStringExtra("on") == "true") ?: "ok"
+            "USB" -> server().setTethering(TetherGuard.TETHERING_USB, intent.getStringExtra("on") == "true") ?: "ok"
+            "USB_HOST" -> server().startUsbHost(android.os.Process.myUid()) ?: "ok"
+            "USB_GUARD" -> UsbGuardService.arm(context, server().asBinder()).let { "armed" }
             "STOP" -> server().stop().let { "ok" }
             "STATUS" -> server().status()
             "SPEED" -> server().speedtest(intent.getStringExtra("url")!!)

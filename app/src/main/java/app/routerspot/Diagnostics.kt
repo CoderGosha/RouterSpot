@@ -63,6 +63,7 @@ object Diagnostics {
         Check("testNetwork", CheckGroup.SERVICE, R.string.diag_test_network),
         Check("tethering", CheckGroup.SERVICE, R.string.diag_tethering),
         Check("softAp", CheckGroup.SERVICE, R.string.diag_softap),
+        Check("usb", CheckGroup.SERVICE, R.string.diag_usb),
         Check("xray", CheckGroup.SERVICE, R.string.diag_xray),
         Check("tun2socks", CheckGroup.SERVICE, R.string.diag_tun2socks),
         Check("profile", CheckGroup.TUNNEL, R.string.diag_profile),
@@ -116,7 +117,7 @@ object Diagnostics {
         set("paired", if (ui.paired) CheckState.OK else CheckState.FAIL, null, Fix.PAIR.takeUnless { ui.paired })
         val server = ServerConnection.server
         set("service", if (server != null) CheckState.OK else CheckState.FAIL, null, Fix.LAUNCH.takeIf { server == null })
-        val serverChecks = listOf("version", "shell", "testNetwork", "tethering", "softAp", "xray", "tun2socks", "tunnel")
+        val serverChecks = listOf("version", "shell", "testNetwork", "tethering", "softAp", "usb", "xray", "tun2socks", "tunnel")
         var current = true
         if (server == null) {
             serverChecks.forEach { set(it, CheckState.SKIP, str(R.string.diag_needs_service)) }
@@ -154,7 +155,9 @@ object Diagnostics {
                     val r = o.optJSONObject(id) ?: return@forEach
                     val detail = r.optString("detail")
                     val shown = if (id == "tunnel" && r.optBoolean("ok")) app.getString(R.string.diag_exit_ip, detail) else detail
-                    set(id, if (r.optBoolean("ok")) CheckState.OK else CheckState.FAIL, shown)
+                    // Без USB работает раздача по Wi-Fi, поэтому это предупреждение, а не ошибка.
+                    val bad = if (id == "usb") CheckState.WARN else CheckState.FAIL
+                    set(id, if (r.optBoolean("ok")) CheckState.OK else bad, shown)
                 }
             }
         }

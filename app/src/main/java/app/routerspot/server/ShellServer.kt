@@ -9,6 +9,7 @@ import android.net.NetworkRequest
 import android.os.Binder
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.IInterface
 import android.os.Looper
@@ -19,6 +20,7 @@ import android.system.OsConstants
 import android.system.StructPollfd
 import app.routerspot.IRouterSpotClient
 import app.routerspot.IRouterSpotServer
+import app.routerspot.ServerConnection
 import app.routerspot.ServerProvider
 import app.routerspot.core.TetherGuard
 import app.routerspot.core.ProxyLink
@@ -44,9 +46,10 @@ import kotlin.system.exitProcess
  * Служебный процесс с правами shell. Запуск (прототип): scripts/run-server.sh
  *
  * При старте передаёт приложению свой binder ([IRouterSpotServer]) через ServerProvider.
+ * Этот же код работает как USB-служба в процессе приложения, см. [runInApp].
  * Для отладки те же действия доступны командами построчно из stdin:
- *   start <vless://...|https://...> | stop | selftest [url] | hotspot on|off | quit
- *   отладка: up | down | sniff | prefer on|off
+ *   start <vless://...|https://...> | stop | selftest [url] | hotspot on|off | usb on|off | quit
+ *   отладка: up | down | sniff | prefer on|off | stopall
  */
 object ShellServer {
     private const val SHELL_PKG = "com.android.shell"
@@ -59,11 +62,14 @@ object ShellServer {
     private const val APP_PKG = "app.routerspot"
     private const val APK_CHECK_MS = 5_000L
     private const val WIFI_SHARING = "wifi_ap_wifi_sharing"
+    private const val USB_INSTRUMENTATION = "app.routerspot.server.UsbInstrumentation"
+    private const val DELEGATE_TRIES = 30
+    private const val DELEGATE_RETRY_MS = 500L
 
     /** Подробные журналы Xray и tun2socks в server.log: `adb shell touch /data/local/tmp/routerspot/verbose`. */
-    private val verbose get() = File(WORK_DIR, "verbose").exists()
+    private val verbose get() = File(workDir, "verbose").exists()
     /** Отладка: MTU стека tun2socks из файла mtu (меньше MTU — меньше MSS для клиентов). */
-    private val mtuOverride get() = runCatching { File(WORK_DIR, "mtu").readText().trim().toInt() }.getOrNull()
+    private val mtuOverride get() = runCatching { File(workDir, "mtu").readText().trim().toInt() }.getOrNull()
     private const val CONNECTIVITY_SCOPE_GLOBAL = 1
     private const val HEALTH_INTERVAL_MS = 15_000L
     private const val HEALTH_FAILS = 2
@@ -74,6 +80,11 @@ object ShellServer {
     private val XRAY_TIMESTAMP = Regex("""^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d\.\d+ """) // своё время ставит log()
 
     private lateinit var main: Handler
+    /** Контекст приложения, если служба работает в его процессе (USB), иначе служба — shell. */
+    private var host: Context? = null
+    private var usbThread: HandlerThread? = null
+    private val callerPkg get() = host?.packageName ?: SHELL_PKG
+    private val workDir get() = host?.let { File(it.filesDir, "usb").path } ?: WORK_DIR
     private val token = Binder()
     private var tun: ParcelFileDescriptor? = null
     private var tunName: String? = null
@@ -90,7 +101,8 @@ object ShellServer {
     /** Проходит ли сейчас трафик через VLESS (см. checkTraffic). */
     private var trafficOk = true
     private var trafficFails = 0
-    private var hotspotByUs = false
+    /** Какую раздачу включили мы (TETHERING_*); её же выключаем при остановке. */
+    private var tetherType: Int? = null
     private var wifiSharingWas: String? = null
 
     // Для статуса в интерфейсе.
@@ -134,6 +146,50 @@ object ShellServer {
         Looper.loop()
     }
 
+    /**
+     * USB-служба. Смена режима USB заставляет init перезапустить adbd и убить всю его cgroup, а с
+     * ней и службу shell. Поэтому USB-раздачей управляет процесс приложения: его запускает zygote,
+     * а права shell ему делегирует служба shell (см. [startUsbHost]). Выжить при force-stop ему не
+     * помочь, защита тут неполная, о чём предупреждает интерфейс.
+     */
+    fun runInApp(context: Context) {
+        host = context
+        File(workDir).mkdirs()
+        if (usbThread == null) {
+            usbThread = HandlerThread("usb-service").also { it.start() }
+            main = Handler(usbThread!!.looper)
+        }
+        log("usb host ready pid=${android.os.Process.myPid()}")
+        runCatching { startGuard() }.onFailure { log("guard: ${it.rootMessage()}") }
+        ServerConnection.attach(context, binder)
+    }
+
+    /** Служба shell: запускает инструментацию приложения и делегирует ей права. */
+    private fun startUsbHost(appUid: Int) {
+        check(host == null) { "already the usb service" }
+        val cmd = "nohup setsid am instrument -w --no-restart $APP_PKG/$USB_INSTRUMENTATION > $WORK_DIR/instrument.log 2>&1 < /dev/null &"
+        ProcessBuilder("sh", "-c", cmd).start().waitFor()
+        // am стартует не сразу, а без активной инструментации делегирование молча ничего не делает.
+        // Повтор безвреден; цикл оборвётся и сам, когда эта служба погибнет при смене режима USB.
+        thread(name = "delegate", isDaemon = true) {
+            val am = asInterface("android.app.IActivityManager", service("activity"))
+            val delegate = am.javaClass.methods.first { it.name == "startDelegateShellPermissionIdentity" }
+            repeat(DELEGATE_TRIES) {
+                runCatching { delegate.invoke(am, appUid, null) }.onFailure { log("delegate: ${it.rootMessage()}") }
+                Thread.sleep(DELEGATE_RETRY_MS)
+            }
+        }
+    }
+
+    private fun quitUsbHost() {
+        if (host == null) return
+        runCatching { stop() }
+        guard?.unregister()
+        guard = null
+        log("usb host stopped")
+        UsbInstrumentation.finishHost()
+    }
+
     private fun exec(cmd: String) {
         if (cmd.startsWith("start ")) return start(cmd.removePrefix("start ").trim())
         if (cmd.startsWith("selftest")) return selftest(cmd.removePrefix("selftest").trim().ifEmpty { SELFTEST_URL })
@@ -145,8 +201,11 @@ object ShellServer {
             "down" -> down()
             "prefer on" -> prefer(true)
             "prefer off" -> prefer(false)
-            "hotspot on" -> hotspot(true)
-            "hotspot off" -> hotspot(false)
+            "hotspot on" -> setTethering(TetherGuard.TETHERING_WIFI, true)
+            "hotspot off" -> setTethering(TetherGuard.TETHERING_WIFI, false)
+            "usb on" -> setTethering(TetherGuard.TETHERING_USB, true)
+            "usb off" -> setTethering(TetherGuard.TETHERING_USB, false)
+            "stopall" -> guard?.stopSharing()
             "quit" -> shutdown()
             else -> log("unknown command: $cmd")
         }
@@ -401,10 +460,10 @@ object ShellServer {
     private fun startChain(proxy: ProxyLink, serverIp: String) {
         up()
         val fd = tun ?: return
-        File(WORK_DIR).mkdirs()
+        File(workDir).mkdirs()
         launchXray(proxy, serverIp)
 
-        val tunnelConfig = File(WORK_DIR, "tunnel.yml").apply { writeText(XrayConfig.tunnel(mtuOverride ?: 1500, verbose)) }
+        val tunnelConfig = File(workDir, "tunnel.yml").apply { writeText(XrayConfig.tunnel(mtuOverride ?: 1500, verbose)) }
         // Библиотека грузится через java.library.path, который задаёт запуск служебного процесса.
         check(TProxyService.TProxyStartService(tunnelConfig.path, fd.fd)) { "tun2socks failed to start" }
         tunnelRunning = true
@@ -433,13 +492,9 @@ object ShellServer {
     }.getOrDefault(false)
 
     private fun startXray(config: String) {
-        // Из каталога приложения shell исполнять не может, копируем в свой рабочий каталог.
-        val binary = File(WORK_DIR, "xray")
-        nativeLib("libxray.so").copyTo(binary, overwrite = true)
-        binary.setExecutable(true)
-        val configFile = File(WORK_DIR, "xray.json").apply { writeText(config) }
-        val process = ProcessBuilder(binary.path, "run", "-c", configFile.path)
-            .directory(File(WORK_DIR))
+        val configFile = File(workDir, "xray.json").apply { writeText(config) }
+        val process = ProcessBuilder(xrayBinary().path, "run", "-c", configFile.path)
+            .directory(File(workDir))
             .redirectErrorStream(true)
             .start()
         xray = process
@@ -479,6 +534,16 @@ object ShellServer {
             Thread.sleep(100)
         }
         error("xray socks port $port did not open")
+    }
+
+    private fun xrayBinary(): File {
+        // Процесс приложения исполняет библиотеку прямо из её каталога, а исполнять из своих данных не может.
+        host?.let { return File(it.applicationInfo.nativeLibraryDir, "libxray.so") }
+        // Из каталога приложения shell исполнять не может, копируем в свой рабочий каталог.
+        val binary = File(WORK_DIR, "xray")
+        nativeLib("libxray.so").copyTo(binary, overwrite = true)
+        binary.setExecutable(true)
+        return binary
     }
 
     /** Нативные библиотеки распакованы рядом с APK: <apk dir>/lib/<abi>/. */
@@ -534,7 +599,7 @@ object ShellServer {
         main.removeCallbacks(healthTask)
         trafficOk = true
         trafficFails = 0
-        if (hotspotByUs) runCatching { hotspot(false) }
+        tetherType?.let { type -> runCatching { setTethering(type, false) } }
         runCatching { prefer(false) }
         if (tunnelRunning) TProxyService.TProxyStopService()
         tunnelRunning = false
@@ -595,7 +660,7 @@ object ShellServer {
         }
         probe("shell") {
             val uid = android.os.Process.myUid()
-            check(uid == 2000) { "uid $uid" }
+            check(host != null || uid == 2000) { "uid $uid" }
             "uid $uid · Android ${android.os.Build.VERSION.RELEASE}"
         }
         probe("testNetwork") {
@@ -611,11 +676,11 @@ object ShellServer {
             "ITetheringConnector"
         }
         probe("softAp") { softApConfig().first ?: error("no SSID") }
+        probe("usb") {
+            onMain { guard?.usbRegexps }.orEmpty().ifEmpty { error("no USB interfaces in firmware config") }.joinToString(" ")
+        }
         probe("xray") {
-            val binary = File(WORK_DIR, "xray")
-            nativeLib("libxray.so").copyTo(binary, overwrite = true)
-            binary.setExecutable(true)
-            val process = ProcessBuilder(binary.path, "version").redirectErrorStream(true).start()
+            val process = ProcessBuilder(xrayBinary().path, "version").redirectErrorStream(true).start()
             val line = process.inputStream.bufferedReader().readLine().orEmpty()
             check(process.waitFor() == 0) { line.ifEmpty { "exit ${process.exitValue()}" } }
             line.substringBefore(" (").ifEmpty { "ok" }
@@ -677,8 +742,8 @@ object ShellServer {
     private fun connectivity() = connectivity
 
     private object ShellContext : ContextWrapper(null) {
-        override fun getPackageName() = SHELL_PKG
-        override fun getOpPackageName() = SHELL_PKG
+        override fun getPackageName() = callerPkg
+        override fun getOpPackageName() = callerPkg
         override fun getAttributionTag(): String? = null
         override fun getApplicationContext() = this
     }
@@ -692,26 +757,28 @@ object ShellServer {
         call(connector, "setPreferTestNetworks", listOf(on), listener("prefer $on"))
     }
 
-    private fun hotspot(on: Boolean) {
-        hotspotByUs = on
+    private fun setTethering(type: Int, on: Boolean) {
+        // Wi-Fi остаётся за службой shell: её сторож переживает и force-stop приложения.
+        check(!on || host == null || type == TetherGuard.TETHERING_USB) { "Wi-Fi sharing needs the shell service" }
+        tetherType = type.takeIf { on }
         val connector = tethering()
         if (on) {
-            keepWifiWithHotspot()
+            if (type == TetherGuard.TETHERING_WIFI) keepWifiWithHotspot()
             // Класс запроса берём из сигнатуры метода: в модуле Tethering он может быть переименован.
             val requestClass = connector.javaClass.methods.first { it.name == "startTethering" }.parameterTypes
                 .first { it.name.endsWith("TetheringRequestParcel") }
             val request = requestClass.getDeclaredConstructor().newInstance()
-            requestClass.getField("tetheringType").setInt(request, 0) // TETHERING_WIFI
+            requestClass.getField("tetheringType").setInt(request, type)
             // exemptFromEntitlementCheck=true требует TETHER_PRIVILEGED, которого у shell нет;
             // без него проверка идёт через WRITE_SETTINGS.
             requestClass.getField("exemptFromEntitlementCheck").setBoolean(request, false)
             requestClass.getField("showProvisioningUi").setBoolean(request, false)
             // Android 16 выбирает режим раздачи по connectivityScope; со значением по умолчанию (UNKNOWN)
-            // Tethering поднимает точку доступа, но не обслуживает её: ни адресов, ни DHCP, ни NAT.
+            // Tethering поднимает интерфейс, но не обслуживает его: ни адресов, ни DHCP, ни NAT.
             runCatching { requestClass.getField("connectivityScope").setInt(request, CONNECTIVITY_SCOPE_GLOBAL) }
-            call(connector, "startTethering", listOf(request), listener("hotspot on"))
+            call(connector, "startTethering", listOf(request), listener("tethering $type on"))
         } else {
-            call(connector, "stopTethering", listOf(0), listener("hotspot off"))
+            call(connector, "stopTethering", listOf(type), listener("tethering $type off"))
             restoreWifiSharing()
         }
     }
@@ -808,10 +875,13 @@ object ShellServer {
     private val binder = object : IRouterSpotServer.Stub() {
         override fun start(vlessLink: String): String? = errorOf { this@ShellServer.start(vlessLink) }
         override fun stop() = onMain { this@ShellServer.stop() }
-        override fun setHotspot(on: Boolean): String? = errorOf { hotspot(on) }
+        override fun setTethering(type: Int, on: Boolean): String? = errorOf { this@ShellServer.setTethering(type, on) }
         override fun status(): String = onMain { statusJson().toString() }
         override fun diagnose(vlessLink: String?): String = this@ShellServer.diagnose(vlessLink).toString()
         override fun speedtest(url: String): String = runCatching { downloadViaTunnel(url) }.getOrElse { it.rootMessage() }
+
+        override fun startUsbHost(appUid: Int): String? = errorOf { this@ShellServer.startUsbHost(appUid) }
+        override fun quitUsbHost() = onMain { this@ShellServer.quitUsbHost() }
 
         override fun attachClient(c: IRouterSpotClient) {
             // Асинхронно: вызов приходит, пока главный поток ждёт ответа провайдера в publishToApp.
@@ -850,6 +920,7 @@ object ShellServer {
             .put("pingMs", pingMs)
             .put("traffic", trafficOk)
             .put("hotspot", hotspotActive)
+            .put("usb", tetherType == TetherGuard.TETHERING_USB)
             .put("clients", clients)
             .put("ssid", softAp?.first)
             .put("passphrase", softAp?.second)
@@ -895,7 +966,7 @@ object ShellServer {
             when {
                 type.name.endsWith("IIntResultListener") -> Class.forName("${type.name}\$Stub", true, type.classLoader)
                     .getMethod("asInterface", IBinder::class.java).invoke(null, listener)
-                type == String::class.java -> if (strings++ == 0) SHELL_PKG else null
+                type == String::class.java -> if (strings++ == 0) callerPkg else null
                 else -> queue.removeFirstOrNull()
             }
         }

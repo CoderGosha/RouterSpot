@@ -11,7 +11,10 @@ data class ServerStatus(
     val pingMs: Long = -1,
     /** Проходит ли трафик через VLESS по последним проверкам службы. */
     val trafficOk: Boolean = true,
+    /** Есть активный интерфейс раздачи: поднятый хотспот или USB с подключённым кабелем. */
     val hotspot: Boolean = false,
+    /** Раздача запущена через USB, а не Wi-Fi. */
+    val usb: Boolean = false,
     val clients: Int = 0,
     val ssid: String? = null,
     val passphrase: String? = null,
@@ -34,6 +37,7 @@ data class ServerStatus(
                 pingMs = o.optLong("pingMs", -1),
                 trafficOk = o.optBoolean("traffic", true),
                 hotspot = o.optBoolean("hotspot"),
+                usb = o.optBoolean("usb"),
                 clients = o.optInt("clients"),
                 ssid = o.optString("ssid").takeIf { o.has("ssid") && !o.isNull("ssid") },
                 passphrase = o.optString("passphrase").takeIf { o.has("passphrase") && !o.isNull("passphrase") },

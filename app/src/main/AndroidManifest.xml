@@ -17,6 +17,11 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- USB-служба получает права shell через инструментацию, см. ShellServer.runInApp. -->
+    <instrumentation
+        android:name="app.routerspot.server.UsbInstrumentation"
+        android:targetPackage="app.routerspot" />
+
     <application
         android:name=".RouterSpotApp"
         android:localeConfig="@xml/locales_config"
@@ -56,6 +61,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the leak guard alive while sharing a VPN-routed hotspot" />
         </service>
+
+        <service
+            android:name=".UsbGuardService"
+            android:exported="false"
+            android:process=":guard" />
 
         <!-- Отладочное управление без UI; отправить может только shell (DUMP). -->
         <receiver

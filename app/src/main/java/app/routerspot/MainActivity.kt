@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
                                     0 -> HomeScreen(
                                         state, profiles,
                                         onStart = AppController::startSharing,
+                                        onUsbMode = AppController::setUsbMode,
                                         onStop = AppController::stopSharing,
                                         onReconnect = AppController::reconnect,
                                         onOpenProfiles = { tab = 1 },

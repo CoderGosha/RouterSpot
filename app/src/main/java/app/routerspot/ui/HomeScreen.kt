@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import app.routerspot.AppController
 import app.routerspot.UiState
 import app.routerspot.data.Profiles
 import app.routerspot.data.ServerStatus
@@ -39,8 +41,8 @@ import com.google.zxing.qrcode.QRCodeWriter
 import androidx.compose.foundation.text.BasicText
 
 @Composable
-private fun chainNodes() = listOf(
-    Triple(Icons.wifi, "", stringResource(R.string.node_hotspot)),
+private fun chainNodes(usb: Boolean) = listOf(
+    if (usb) Triple(Icons.usb, "", "USB") else Triple(Icons.wifi, "", stringResource(R.string.node_hotspot)),
     Triple(null, "TUN", stringResource(R.string.node_tunnel)),
     Triple(Icons.shield, "", stringResource(R.string.node_vpn)),
 )
@@ -51,6 +53,7 @@ fun HomeScreen(
     state: UiState,
     profiles: Profiles,
     onStart: () -> Unit,
+    onUsbMode: (Boolean) -> Unit,
     onStop: () -> Unit,
     onReconnect: () -> Unit,
     onOpenProfiles: () -> Unit,
@@ -60,22 +63,74 @@ fun HomeScreen(
         state.alert -> AlertContent(state, onReconnect, onStop)
         state.stalled -> StalledContent(state, onReconnect, onStop)
         state.sharing -> ActiveContent(state, onStop)
-        else -> IdleContent(state, profiles, onStart, onOpenProfiles, onOpenSystem)
+        else -> IdleContent(state, profiles, onStart, onUsbMode, onOpenProfiles, onOpenSystem)
     }
 }
 
+/** Значок клиентов на схеме: чем они подключены. */
+private fun clientsIcon(s: ServerStatus) = if (s.usb) Icons.usb else Icons.wifi
+
+/** Способ раздачи: Wi-Fi или USB. */
+@Composable
+private fun ModeSwitch(usb: Boolean, enabled: Boolean, onUsbMode: (Boolean) -> Unit) {
+    val c = colors
+    var warn by remember { mutableStateOf(false) }
+    if (warn) UsbWarning(onDismiss = { warn = false }) {
+        AppController.usbWarned = true
+        warn = false
+        onUsbMode(true)
+    }
+    Row(Modifier.fillMaxWidth().background(c.line).border(1.dp, c.line), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+        listOf(Triple(false, Icons.wifi, "Wi-Fi"), Triple(true, Icons.usb, "USB")).forEach { (mode, icon, title) ->
+            val selected = usb == mode
+            Row(
+                Modifier.weight(1f).height(44.dp).background(if (selected) c.accent else c.card)
+                    .clickable(enabled = enabled, role = Role.RadioButton) {
+                        if (mode && !AppController.usbWarned) warn = true else onUsbMode(mode)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            ) {
+                Icon(icon, if (selected) c.onAccent else c.mute)
+                Text(title, Type.bodyBold.copy(fontSize = 14.sp), if (selected) c.onAccent else c.mute)
+                if (mode) Chip(stringResource(R.string.usb_beta))
+            }
+        }
+    }
+}
+
+/** Подтверждение перед первым включением USB: защита от утечек в этом режиме неполная. */
+@Composable
+private fun UsbWarning(onDismiss: () -> Unit, onAccept: () -> Unit) {
+    val c = colors
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.background(c.card).border(1.5.dp, c.ink).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Label(stringResource(R.string.usb_warn_label), c.alarm)
+            Text(stringResource(R.string.usb_warn_text), Type.small)
+            Cta(stringResource(R.string.usb_warn_accept), null, onClick = onAccept)
+            Cta(stringResource(R.string.usb_warn_cancel), null, CtaStyle.GHOST, onClick = onDismiss)
+        }
+    }
+}
+
+/** Отметка kill-switch: в режиме USB защита неполная, см. [UsbWarning]. */
+@Composable
+private fun KillSwitch(s: ServerStatus) =
+    if (s.usb) Guard(stringResource(R.string.row_killswitch), stringResource(R.string.val_partial), Dot.BAD)
+    else Guard(stringResource(R.string.row_killswitch), stringResource(R.string.val_on))
+
 /** Компактная отметка защиты: точка, название и состояние в одну строку. */
 @Composable
-private fun Guard(title: String, value: String) {
+private fun Guard(title: String, value: String, dot: Dot = Dot.ON) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        StatusDot(Dot.ON)
+        StatusDot(dot)
         Text(title, Type.small.copy(fontWeight = FontWeight.SemiBold))
         Text(value.uppercase(), Type.mono, colors.mute)
     }
 }
 
 @Composable
-private fun IdleContent(state: UiState, profiles: Profiles, onStart: () -> Unit, onOpenProfiles: () -> Unit, onOpenSystem: () -> Unit) {
+private fun IdleContent(state: UiState, profiles: Profiles, onStart: () -> Unit, onUsbMode: (Boolean) -> Unit, onOpenProfiles: () -> Unit, onOpenSystem: () -> Unit) {
     val c = colors
     Screen(
         footer = {
@@ -86,15 +141,21 @@ private fun IdleContent(state: UiState, profiles: Profiles, onStart: () -> Unit,
             }
             state.error?.let { Text(it, Type.small, c.alarm) }
         },
+        spacing = 16.dp,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Label(stringResource(R.string.home_idle_label))
             Text(stringResource(R.string.home_idle_title).replace('\n', ' '), Type.title, maxLines = 1)
         }
-        Chain(chainNodes(), List(3) { NodeState.OFF }, List(2) { NodeState.OFF })
+        ModeSwitch(state.usbMode, state.busy == null, onUsbMode)
+        Chain(chainNodes(state.usbMode), List(3) { NodeState.OFF }, List(2) { NodeState.OFF })
         StatusRows {
             StatusRow("VPN", stringResource(R.string.val_disconnected), Dot.OFF)
-            StatusRow(stringResource(R.string.row_hotspot), if (state.status.hotspot) stringResource(R.string.val_on) else stringResource(R.string.val_off), if (state.status.hotspot) Dot.ON else Dot.OFF)
+            if (state.usbMode) {
+                StatusRow(stringResource(R.string.usb_label), stringResource(if (state.usbCable) R.string.val_cable_on else R.string.val_cable_off), if (state.usbCable) Dot.ON else Dot.OFF)
+            } else {
+                StatusRow(stringResource(R.string.row_hotspot), if (state.status.hotspot) stringResource(R.string.val_on) else stringResource(R.string.val_off), if (state.status.hotspot) Dot.ON else Dot.OFF)
+            }
             StatusRow(
                 stringResource(R.string.row_service),
                 when { state.serverAttached -> stringResource(R.string.val_ready); state.paired -> stringResource(R.string.val_not_running); else -> stringResource(R.string.val_not_paired) },
@@ -135,7 +196,7 @@ private fun ActiveContent(state: UiState, onStop: () -> Unit) {
         }
         Chain(
             listOf(
-                Triple(Icons.wifi, "", pluralStringResource(R.plurals.clients, s.clients, s.clients)),
+                Triple(clientsIcon(s), "", pluralStringResource(R.plurals.clients, s.clients, s.clients)),
                 Triple(null, "TUN", "TCP·UDP·DNS"),
                 Triple(Icons.shield, "", if (s.pingMs >= 0) stringResource(R.string.ping_ms, s.pingMs.toInt()) else stringResource(R.string.node_vpn)),
             ),
@@ -145,7 +206,14 @@ private fun ActiveContent(state: UiState, onStop: () -> Unit) {
             Stat(stringResource(R.string.stat_down), state.downSpeed, Modifier.weight(1f))
             Stat(stringResource(R.string.stat_up), state.upSpeed, Modifier.weight(1f))
         }
-        Card {
+        if (s.usb) Card {
+            // После отключения кабеля система сама не возобновляет USB-раздачу.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Label(stringResource(R.string.usb_label))
+                Text(stringResource(if (s.hotspot) R.string.val_cable_on else R.string.val_cable_off), Type.bodyBold)
+                if (!s.hotspot) Text(stringResource(R.string.usb_restart_hint), Type.small, c.mute)
+            }
+        } else Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Label(stringResource(R.string.wifi_label))
@@ -168,7 +236,7 @@ private fun ActiveContent(state: UiState, onStop: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Guard(stringResource(R.string.row_killswitch), stringResource(R.string.val_on))
+            KillSwitch(s)
             Guard(stringResource(R.string.row_ipv6), stringResource(R.string.val_blocked))
         }
     }
@@ -196,7 +264,7 @@ private fun StalledContent(state: UiState, onReconnect: () -> Unit, onStop: () -
         }
         Chain(
             listOf(
-                Triple(Icons.wifi, "", pluralStringResource(R.plurals.clients, s.clients, s.clients)),
+                Triple(clientsIcon(s), "", pluralStringResource(R.plurals.clients, s.clients, s.clients)),
                 Triple(null, "TUN", "TCP·UDP·DNS"),
                 // Пинг меряет только установку соединения — при блокировке он «в норме» и вводит в заблуждение.
                 Triple(Icons.alert, "", stringResource(R.string.node_vpn)),
@@ -205,7 +273,7 @@ private fun StalledContent(state: UiState, onReconnect: () -> Unit, onStop: () -
             listOf(NodeState.ON, NodeState.BAD),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Guard(stringResource(R.string.row_killswitch), stringResource(R.string.val_on))
+            KillSwitch(s)
             Guard(stringResource(R.string.row_ipv6), stringResource(R.string.val_blocked))
         }
     }
@@ -238,7 +306,7 @@ private fun AlertContent(state: UiState, onReconnect: () -> Unit, onStop: () -> 
             )
         }
         Chain(
-            listOf(Triple(Icons.wifi, "", pluralStringResource(R.plurals.clients, s.clients, s.clients)), Triple(null, "TUN", stringResource(R.string.node_block)), Triple(Icons.alert, "", stringResource(R.string.node_vpn))),
+            listOf(Triple(clientsIcon(s), "", pluralStringResource(R.plurals.clients, s.clients, s.clients)), Triple(null, "TUN", stringResource(R.string.node_block)), Triple(Icons.alert, "", stringResource(R.string.node_vpn))),
             listOf(NodeState.OFF, NodeState.OFF, NodeState.BAD),
             listOf(NodeState.ON, NodeState.BAD),
         )

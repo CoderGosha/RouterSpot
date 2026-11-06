@@ -155,7 +155,7 @@
     <string name="about_leak_title">Leak protection</string>
     <string name="about_leak_text">• The hotspot upstream is the tunnel only. If the VPN drops, packets have nowhere to go: clients are offline, but never direct.\n• A guard in the service and in the app: if the system switches sharing to mobile data or the service dies, all sharing turns off, including USB and Bluetooth tethering turned on by hand.\n• Xray restarts automatically; after 5 failures in a row sharing stops.\n• Clients get no IPv6.</string>
     <string name="about_limits_title">Limitations</string>
-    <string name="about_limits_text">• Android 13+. Hidden APIs depend on the firmware — on some phones the mechanism may not work.\n• The service lives until a restart. To start it again you need wireless debugging, which needs a connection to any Wi-Fi network.\n• On phones that can’t run Wi-Fi and a hotspot at the same time, debugging turns off when sharing starts — the service keeps running.</string>
+    <string name="about_limits_text">• Android 13+. Hidden APIs depend on the firmware — on some phones the mechanism may not work.\n• The service lives until a restart. To start it again you need wireless debugging, which needs a connection to any Wi-Fi network.\n• On phones that can’t run Wi-Fi and a hotspot at the same time, debugging turns off when sharing starts — the service keeps running.\n• USB is experimental, and its leak protection is partial: if the system closes the whole app, for example with “Force stop”, the device on the cable may go online directly, without VPN.\n• USB: after the cable is unplugged, sharing has to be started again. Wi-Fi sharing after USB needs the service restarted through wireless debugging.</string>
     <plurals name="clients">
         <item quantity="one">%d client</item>
         <item quantity="other">%d clients</item>
@@ -192,6 +192,7 @@
     <string name="diag_test_network">Test network (hidden API)</string>
     <string name="diag_tethering">Tethering control (hidden API)</string>
     <string name="diag_softap">Hotspot settings</string>
+    <string name="diag_usb">USB tethering</string>
     <string name="diag_xray">Xray</string>
     <string name="diag_tun2socks">tun2socks</string>
     <string name="diag_profile">Server profile</string>
@@ -255,4 +256,15 @@
     <string name="stalled_text">The server accepts connections but no data gets through — looks like the provider is blocking it. There is no direct route: clients stay offline until the server responds. Checked every 15 seconds.</string>
     <string name="notif_no_traffic">The server passes no traffic</string>
     <string name="err_no_traffic">The server accepts connections but passes no traffic — the provider may be blocking it. Try later or another server.</string>
+    <string name="usb_label">USB cable</string>
+    <string name="val_cable_on">Connected</string>
+    <string name="val_cable_off">Not connected</string>
+    <string name="usb_restart_hint">Connect the cable. If it was unplugged, stop sharing and start it again.</string>
+    <string name="err_usb_cable">Connect the phone to the other device with a USB cable</string>
+    <string name="val_partial">Partial</string>
+    <string name="usb_beta">beta</string>
+    <string name="usb_warn_label">// USB · partial protection</string>
+    <string name="usb_warn_text">In USB mode leak protection is partial. If the system closes the app, the device on the cable may go online directly, without VPN, and you won’t be told. For full protection use Wi-Fi.</string>
+    <string name="usb_warn_accept">Use USB</string>
+    <string name="usb_warn_cancel">Cancel</string>
 </resources>

@@ -1,12 +1,15 @@
 package app.routerspot
 
 import android.content.Context
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Process
 import android.provider.Settings
 import app.routerspot.adb.AdbDiscovery
 import app.routerspot.adb.AdbManager
 import app.routerspot.adb.ServerLauncher
+import app.routerspot.core.TetherGuard
 import app.routerspot.data.ProfileStore
 import app.routerspot.data.ServerStatus
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +36,10 @@ data class UiState(
     val error: String? = null,
     /** Служебный процесс погиб во время раздачи: сторож уже выключил хотспот. */
     val serviceLost: Boolean = false,
+    /** Выбранный способ раздачи: USB вместо Wi-Fi. */
+    val usbMode: Boolean = false,
+    /** Телефон подключён кабелем к другому устройству. */
+    val usbCable: Boolean = false,
 ) {
     val sharing get() = status.state == ServerStatus.State.RUNNING || status.state == ServerStatus.State.RECONNECTING
     /** Первый незавершённый шаг настройки (1–4) или 5, если всё готово. */
@@ -63,7 +70,7 @@ object AppController {
         if (::app.isInitialized) return
         app = context.applicationContext
         profiles = ProfileStore(app)
-        mutable.update { it.copy(paired = prefs().getBoolean(KEY_PAIRED, false)) }
+        mutable.update { it.copy(paired = prefs().getBoolean(KEY_PAIRED, false), usbMode = uiPrefs().getBoolean(KEY_USB_MODE, false)) }
         ServerConnection.onDied = { wasActive -> mutable.update { it.copy(serviceLost = wasActive, serverAttached = false) } }
         scope.launch {
             while (true) {
@@ -105,6 +112,7 @@ object AppController {
                 devMode = dev,
                 wifi = wifi,
                 wirelessDebugging = wireless,
+                usbCable = usbConnected(),
                 status = status ?: if (server == null) ServerStatus() else s.status,
                 downSpeed = down,
                 upSpeed = up,
@@ -113,14 +121,31 @@ object AppController {
     }
 
     /** Кнопка «Раздавать VPN»: при необходимости запускает службу, затем туннель и хотспот. */
-    fun startSharing() = action(app.getString(R.string.busy_starting)) {
+    fun startSharing() = action(app.getString(R.string.busy_starting)) { share() }
+
+    /** Туннель и раздача выбранным способом. */
+    private suspend fun share() {
         val profile = profiles.profiles.value.selected ?: error(app.getString(R.string.err_no_profile))
-        val server = ensureServer()
+        val usb = mutable.value.usbMode
+        if (usb && !usbConnected()) error(app.getString(R.string.err_usb_cable))
+        val server = if (usb) ensureUsbHost() else ensureServer()
         server.start(profile.startLink)?.let { error(it) }
-        server.setHotspot(true)?.let { error(it) }
+        // Сторож должен быть готов раньше, чем появится раздача.
+        if (usb) UsbGuardService.arm(app, server.asBinder())
+        server.setTethering(if (usb) TetherGuard.TETHERING_USB else TetherGuard.TETHERING_WIFI, true)?.let { error(it) }
         RouterSpotService.start(app)
         mutable.update { it.copy(serviceLost = false) }
     }
+
+    fun setUsbMode(usb: Boolean) {
+        uiPrefs().edit().putBoolean(KEY_USB_MODE, usb).apply()
+        mutable.update { it.copy(usbMode = usb) }
+    }
+
+    /** Sticky-рассылка USB_STATE: connected — кабель подключён к хосту, а не просто к зарядке. */
+    private fun usbConnected(): Boolean = runCatching {
+        app.registerReceiver(null, IntentFilter("android.hardware.usb.action.USB_STATE"))?.getBooleanExtra("connected", false)
+    }.getOrNull() == true
 
     fun stopSharing() = action(app.getString(R.string.busy_stopping)) {
         ServerConnection.server?.stop()
@@ -130,12 +155,7 @@ object AppController {
     /** «Переподключить» на экране обрыва: перезапуск туннеля с тем же профилем. */
     fun reconnect() = action(app.getString(R.string.busy_reconnecting)) {
         ServerConnection.server?.stop()
-        val profile = profiles.profiles.value.selected ?: error(app.getString(R.string.err_no_profile))
-        val server = ensureServer()
-        server.start(profile.startLink)?.let { error(it) }
-        server.setHotspot(true)?.let { error(it) }
-        RouterSpotService.start(app)
-        mutable.update { it.copy(serviceLost = false) }
+        share()
     }
 
     /** Выбор профиля; во время раздачи сервер меняется на ходу, при неудаче выбор откатывается. */
@@ -184,18 +204,34 @@ object AppController {
 
     /** Язык выбирается на первом экране; до выбора показываем экран выбора. */
     var languageChosen: Boolean
-        get() = app.getSharedPreferences("ui", Context.MODE_PRIVATE).getBoolean("language", false)
-        set(value) = app.getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putBoolean("language", value).apply()
+        get() = uiPrefs().getBoolean("language", false)
+        set(value) = uiPrefs().edit().putBoolean("language", value).apply()
 
     /** Гайд при первом запуске показывается один раз. */
     var onboarded: Boolean
-        get() = app.getSharedPreferences("ui", Context.MODE_PRIVATE).getBoolean("onboarded", false)
-        set(value) = app.getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putBoolean("onboarded", value).apply()
+        get() = uiPrefs().getBoolean("onboarded", false)
+        set(value) = uiPrefs().edit().putBoolean("onboarded", value).apply()
+
+    /** Предупреждение о неполной защите в режиме USB показывается один раз. */
+    var usbWarned: Boolean
+        get() = uiPrefs().getBoolean("usb_warned", false)
+        set(value) = uiPrefs().edit().putBoolean("usb_warned", value).apply()
 
     fun dismissError() = mutable.update { it.copy(error = null, serviceLost = false) }
 
+    /** USB-служба: при необходимости её запускает служба shell, та после этого уже не нужна. */
+    private suspend fun ensureUsbHost(): IRouterSpotServer {
+        if (ServerConnection.usbHosted) return ServerConnection.server!!
+        ensureServer().startUsbHost(Process.myUid())?.let { error(it) }
+        return withTimeoutOrNull(USB_HOST_TIMEOUT_MS) {
+            while (!ServerConnection.usbHosted) delay(100)
+            ServerConnection.server
+        } ?: error(app.getString(R.string.err_no_answer))
+    }
+
+    /** Служба shell. USB-служба её не заменяет: при подключении новая служба сменит USB-службу. */
     private suspend fun ensureServer(): IRouterSpotServer {
-        ServerConnection.server?.let { server ->
+        ServerConnection.server?.takeUnless { ServerConnection.usbHosted }?.let { server ->
             if (!isStale(server)) return server
             // Служба от прошлой версии ищет Xray в удалённом APK — её нужно перезапустить.
             if (!mutable.value.wirelessDebugging) error(app.getString(R.string.err_service_outdated))
@@ -205,7 +241,7 @@ object AppController {
         onPaired() // подключение по ADB удалось — значит, сопряжение есть
         return withTimeoutOrNull(10_000) {
             var server = ServerConnection.server
-            while (server == null || isStale(server)) {
+            while (server == null || ServerConnection.usbHosted || isStale(server)) {
                 delay(100)
                 server = ServerConnection.server
             }
@@ -236,5 +272,8 @@ object AppController {
     }
 
     private fun prefs() = app.getSharedPreferences("adb", Context.MODE_PRIVATE)
+    private fun uiPrefs() = app.getSharedPreferences("ui", Context.MODE_PRIVATE)
     private const val KEY_PAIRED = "paired"
+    private const val KEY_USB_MODE = "usb_mode"
+    private const val USB_HOST_TIMEOUT_MS = 20_000L
 }
