@@ -459,7 +459,7 @@ object ShellServer {
         if (xray !== process || !vpnActive) return
         if (++xrayRestarts > MAX_XRAY_RESTARTS) {
             log("xray keeps crashing, stopping hotspot")
-            guard?.stopHotspot()
+            guard?.stopSharing()
             stop()
             failure = "Xray crashed $MAX_XRAY_RESTARTS times in a row"
             return

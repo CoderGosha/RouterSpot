@@ -82,14 +82,14 @@ class TetherGuard(
             return
         }
         log("guard: upstream switched to non-tunnel network $network, stopping hotspot")
-        stopHotspot()
+        stopSharing()
     }
 
     private fun checkUpstream(reason: String) {
         val network = upstream ?: return
         if (!armed() || isTestNetwork(network)) return
         log("guard: $reason ($network), stopping hotspot")
-        stopHotspot()
+        stopSharing()
     }
 
     fun isTestNetwork(network: Network): Boolean {
@@ -97,15 +97,25 @@ class TetherGuard(
         return caps.hasTransport(TRANSPORT_TEST)
     }
 
-    fun stopHotspot() {
-        runCatching {
-            tethering.javaClass.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tethering, TETHERING_WIFI)
-        }.onFailure { log("guard: stopTethering failed: ${it.cause ?: it}") }
+    /**
+     * Выключает раздачу всех видов, а не только нашу: USB-модем или Bluetooth, включённые вручную,
+     * идут через тот же выход и иначе остались бы с прямым выходом в интернет.
+     */
+    fun stopSharing() {
+        runCatching { tethering.javaClass.getMethod("stopAllTethering").invoke(tethering) }.onFailure {
+            log("guard: stopAllTethering failed: ${it.cause ?: it}")
+            listOf(TETHERING_WIFI, TETHERING_USB).forEach { type ->
+                runCatching {
+                    tethering.javaClass.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tethering, type)
+                }.onFailure { e -> log("guard: stopTethering($type) failed: ${e.cause ?: e}") }
+            }
+        }
     }
 
     companion object {
         const val TRANSPORT_TEST = 7 // NetworkCapabilities.TRANSPORT_TEST, @SystemApi
         const val TETHERING_WIFI = 0
+        const val TETHERING_USB = 1
         private const val GRACE_MS = 5_000L
     }
 }

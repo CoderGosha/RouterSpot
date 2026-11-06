@@ -72,7 +72,7 @@
     <string name="alert_label">// Kill-switch · triggered</string>
     <string name="alert_service_title">Service\nstopped</string>
     <string name="alert_tunnel_title">Tunnel\nlost</string>
-    <string name="alert_service_text">The hotspot was turned off so clients don’t go online directly. Start sharing again.</string>
+    <string name="alert_service_text">Sharing was turned off so clients don’t go online directly. Start sharing again.</string>
     <string name="alert_failed_text">Could not restore VPN: %1$s. Direct access is closed.</string>
     <string name="alert_xray_error">Xray error</string>
     <string name="alert_tunnel_text">Sharing is blocked: direct access is closed, clients stay offline until the VPN is back.</string>
@@ -133,7 +133,7 @@
     <string name="ob3_reboot_text">The service lives until the phone restarts. Then connect to any Wi-Fi and tap “Start service” — no need to pair again.</string>
     <string name="ob4_label">// 04 · Protection</string>
     <string name="ob4_title">No leaks</string>
-    <string name="ob4_text">If the tunnel drops, clients stay offline but never go online directly. If the service stops, the hotspot turns off by itself. Clients get no IPv6.</string>
+    <string name="ob4_text">If the tunnel drops, clients stay offline but never go online directly. If the service stops, sharing turns off by itself. Clients get no IPv6.</string>
     <string name="ob4_how">How it works →</string>
     <string name="about_title_bar">How it works</string>
     <string name="about_label">// Diagram</string>
@@ -153,7 +153,7 @@
     <string name="about_noroot_title">Why no root</string>
     <string name="about_noroot_text">Android lets only system processes share traffic through their own tunnel. RouterSpot connects to the phone’s own wireless debugging (like a computer over ADB) and starts a service with shell rights. The service creates a test network and asks the system to make it the hotspot upstream.</string>
     <string name="about_leak_title">Leak protection</string>
-    <string name="about_leak_text">• The hotspot upstream is the tunnel only. If the VPN drops, packets have nowhere to go: clients are offline, but never direct.\n• A guard in the service and in the app: if the system switches sharing to mobile data or the service dies, the hotspot turns off.\n• Xray restarts automatically; after 5 failures in a row sharing stops.\n• Clients get no IPv6.</string>
+    <string name="about_leak_text">• The hotspot upstream is the tunnel only. If the VPN drops, packets have nowhere to go: clients are offline, but never direct.\n• A guard in the service and in the app: if the system switches sharing to mobile data or the service dies, all sharing turns off, including USB and Bluetooth tethering turned on by hand.\n• Xray restarts automatically; after 5 failures in a row sharing stops.\n• Clients get no IPv6.</string>
     <string name="about_limits_title">Limitations</string>
     <string name="about_limits_text">• Android 13+. Hidden APIs depend on the firmware — on some phones the mechanism may not work.\n• The service lives until a restart. To start it again you need wireless debugging, which needs a connection to any Wi-Fi network.\n• On phones that can’t run Wi-Fi and a hotspot at the same time, debugging turns off when sharing starts — the service keeps running.</string>
     <plurals name="clients">

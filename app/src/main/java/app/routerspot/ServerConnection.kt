@@ -51,7 +51,7 @@ object ServerConnection {
         Log.w(TAG, "server died, vpnActive=$wasActive")
         if (wasActive) {
             vpnActive = false
-            guard?.stopHotspot()
+            guard?.stopSharing()
         }
         onDied?.invoke(wasActive)
     }
